@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coach Log</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='34' fill='%232B2B2B'/%3E%3Ccircle cx='90' cy='90' r='58' fill='%23C8102E' stroke='%23fff' stroke-width='6'/%3E%3Ctext x='90' y='108' font-family='Arial' font-weight='800' font-size='58' fill='%23fff' text-anchor='middle'%3ECL%3C/text%3E%3C/svg%3E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Coach Log">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --red:#C8102E; --red-deep:#8E0B21; --ink:#1A1A1A; --charcoal:#2B2B2B;
+    --slate:#6B6B6B; --slate-light:#9C9C9C; --paper:#FAFAFA; --card:#FFFFFF;
+    --border:#E5E5E5; --shadow-lg:0 4px 16px rgba(0,0,0,0.08);
+    --green:#1E8E5A; --amber:#B5790A;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; overflow-x:hidden; width:100%; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.5;}
+  h1,h2,h3{font-family:"Arial Narrow",Helvetica,Arial,sans-serif; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; color:var(--charcoal); margin:0 0 6px 0;}
+  .topbar{background:var(--charcoal); color:#fff; position:sticky; top:0; z-index:50; box-shadow:var(--shadow-lg); border-bottom:3px solid var(--red);}
+  .topbar-inner{max-width:900px; margin:0 auto; padding:12px 18px; padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right)); display:flex; align-items:center; justify-content:space-between; gap:12px;}
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{width:34px; height:34px; border-radius:8px; background:var(--red); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; flex-shrink:0;}
+  .brand h1{font-size:15px; color:#fff; margin:0;}
+  .coach-link{background:none; border:1px solid #555; color:#999; font-size:10.5px; padding:5px 10px; border-radius:14px; cursor:pointer; font-family:inherit; text-transform:uppercase; letter-spacing:0.04em;}
+  .coach-link:hover{border-color:var(--red); color:#fff;}
+  .wrap{max-width:900px; margin:0 auto; padding:20px 18px 60px; padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right));}
+  .card{background:var(--card); border-radius:10px; padding:14px 16px; box-shadow:var(--shadow-lg); border:1px solid var(--border);}
+  .accent-red{border-left:4px solid var(--red);}
+  .accent-charcoal{border-left:4px solid var(--charcoal);}
+  .accent-amber{border-left:4px solid var(--amber);}
+  .small{font-size:13.5px; color:var(--slate);}
+  #login-panel{max-width:400px; margin:60px auto; padding:0 18px;}
+  .login-field{width:100%; border:1.5px solid var(--border); border-radius:6px; padding:10px; font-size:14px; margin-bottom:10px; font-family:inherit;}
+  .login-btn{width:100%; background:var(--charcoal); color:#fff; border:none; border-radius:8px; padding:12px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;}
+
+  .week-nav{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px;}
+  .week-nav button{background:var(--charcoal); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;}
+  .week-nav button:hover{background:var(--red);}
+  .week-label{font-weight:800; font-size:15px; color:var(--charcoal); text-align:center; flex:1;}
+  .week-nav .today-btn{background:none; border:1px solid var(--border); color:var(--slate); font-weight:600; text-transform:none;}
+
+  table.roster{width:100%; border-collapse:collapse;}
+  table.roster th{text-align:center; font-size:11px; text-transform:uppercase; letter-spacing:0.03em; color:var(--slate); padding:8px 4px; border-bottom:2px solid var(--border);}
+  table.roster th.name-col{text-align:left;}
+  table.roster td{padding:10px 4px; text-align:center; border-bottom:1px solid var(--border); vertical-align:middle;}
+  table.roster tr:last-child td{border-bottom:none;}
+  table.roster tr{cursor:pointer;}
+  table.roster tr:hover td{background:#FAFAFA;}
+  .name-cell{text-align:left !important; font-weight:700; font-size:14px; color:var(--ink);}
+  .checkbox{width:32px; height:32px; border-radius:7px; border:2px solid var(--border); display:inline-flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; color:#fff; background:#fff;}
+  .checkbox.good{background:var(--green); border-color:var(--green);}
+  .checkbox.tough{background:var(--amber); border-color:var(--amber);}
+  .checkbox.too-much{background:var(--red); border-color:var(--red);}
+  .checkbox.done{background:var(--slate-light); border-color:var(--slate-light);}
+  .flag-badge{background:var(--red); color:#fff; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em; display:inline-block;}
+  .detail-panel{display:none; padding:10px 14px 14px; background:#FAFAFA;}
+  .detail-panel.open{display:table-row;}
+  .detail-panel td{border-bottom:1px solid var(--border); text-align:left;}
+  .detail-ex{padding:4px 0; font-size:13px;}
+  .detail-ex.flagged{color:var(--red); font-weight:700;}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px;}
+  .legend-item{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--slate);}
+  .legend-dot{width:12px; height:12px; border-radius:3px;}
+</style>
+</head>
+<body>
+
+<div id="login-panel">
+  <h2 style="text-align:center;">Coach Log</h2>
+  <p class="small" style="text-align:center; margin-bottom:20px;">Sign in with your coach account.</p>
+  <input type="email" id="login-email" class="login-field" placeholder="Email">
+  <input type="password" id="login-password" class="login-field" placeholder="Password">
+  <button class="login-btn" onclick="doSignIn()">Sign In</button>
+  <p class="small" id="login-status" style="text-align:center; margin-top:10px;"></p>
+</div>
+
+<div id="main-app" style="display:none;">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><div class="brand-mark">CL</div><h1>Coach Log</h1></div>
+      <button class="coach-link" onclick="doSignOut()">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="week-nav">
+      <button onclick="changeWeek(-1)">&larr; Prev</button>
+      <div>
+        <div class="week-label" id="week-label">Loading...</div>
+        <div style="text-align:center;"><button class="today-btn" onclick="goToCurrentWeek()">This Week</button></div>
+      </div>
+      <button onclick="changeWeek(1)">Next &rarr;</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div>Good</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber);"></div>Tough</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red);"></div>Too Much</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--slate-light);"></div>Done, no check-in</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fff; border:1.5px solid var(--border);"></div>Not logged yet</div>
+    </div>
+
+    <div class="card accent-charcoal">
+      <table class="roster">
+        <thead>
+          <tr>
+            <th class="name-col">Athlete</th>
+            <th>1st Lift</th>
+            <th>2nd Lift</th>
+            <th>3rd Lift</th>
+            <th>Flags</th>
+          </tr>
+        </thead>
+        <tbody id="roster-body"><tr><td colspan="5" class="small">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  var SUPABASE_URL = "https://scjfzzcpiirhlmkamqcg.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_v83BXXAIW3UoMrndPi4tCw_cMoaPbnR";
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  var auth = { user:null, role:null };
+  var currentWeekStart = null; // Date object, Monday of the viewed week
+  var athletesCache = null;
+
+  window.doSignIn = async function(){
+    var email = document.getElementById('login-email').value.trim();
+    var password = document.getElementById('login-password').value;
+    var status = document.getElementById('login-status');
+    if (!email || !password){ status.textContent = 'Enter your email and password.'; return; }
+    status.textContent = 'Signing in...';
+    var res = await sb.auth.signInWithPassword({ email: email, password: password });
+    if (res.error){ status.textContent = res.error.message; return; }
+    await loadProfileAndStart();
+  };
+
+  window.doSignOut = async function(){
+    await sb.auth.signOut();
+    location.reload();
+  };
+
+  async function loadProfileAndStart(){
+    var status = document.getElementById('login-status');
+    var sessionRes = await sb.auth.getSession();
+    var user = sessionRes.data.session ? sessionRes.data.session.user : null;
+    if (!user) return;
+    auth.user = user;
+    var profRes = await sb.from('profiles').select('role').eq('id', user.id).single();
+    if (profRes.error || !profRes.data){
+      if (status) status.textContent = 'Profile lookup failed: ' + (profRes.error ? profRes.error.message : 'no matching row');
+      return;
+    }
+    if (profRes.data.role !== 'coach'){
+      if (status) status.textContent = 'This account is not a coach account.';
+      return;
+    }
+    auth.role = profRes.data.role;
+    document.getElementById('login-panel').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    goToCurrentWeek();
+  }
+
+  // ---------------- DATE HELPERS ----------------
+  function mondayOf(d){
+    var day = d.getDay(); // 0=Sun...6=Sat
+    var diff = day === 0 ? -6 : 1 - day;
+    var m = new Date(d);
+    m.setDate(d.getDate() + diff);
+    m.setHours(0,0,0,0);
+    return m;
+  }
+  function addDays(d, n){
+    var r = new Date(d);
+    r.setDate(r.getDate() + n);
+    return r;
+  }
+  function isoDate(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  function fmtWeek(d){
+    var end = addDays(d, 6);
+    var opts = {month:'short', day:'numeric'};
+    return 'Week of ' + d.toLocaleDateString(undefined, opts) + ' \u2013 ' + end.toLocaleDateString(undefined, opts);
+  }
+
+  window.goToCurrentWeek = function(){
+    currentWeekStart = mondayOf(new Date());
+    renderWeek();
+  };
+  window.changeWeek = function(delta){
+    currentWeekStart = addDays(currentWeekStart, delta*7);
+    renderWeek();
+  };
+
+  // ---------------- NUMBER PARSING ----------------
+  function parseNum(str){
+    if (str == null) return null;
+    var m = String(str).match(/[\d.]+/);
+    if (!m) return null;
+    var n = parseFloat(m[0]);
+    return isNaN(n) ? null : n;
+  }
+
+  // ---------------- MAIN RENDER ----------------
+  async function renderWeek(){
+    document.getElementById('week-label').textContent = fmtWeek(currentWeekStart);
+    var bodyEl = document.getElementById('roster-body');
+    bodyEl.innerHTML = '<tr><td colspan="5" class="small">Loading...</td></tr>';
+
+    if (!athletesCache){
+      var aRes = await sb.from('athletes').select('id,name').order('name');
+      if (aRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load athletes: ' + aRes.error.message + '</td></tr>'; return; }
+      athletesCache = aRes.data;
+    }
+
+    var weekStartIso = isoDate(currentWeekStart);
+    var weekEndIso = isoDate(addDays(currentWeekStart, 6));
+    var prevWeekStart = addDays(currentWeekStart, -7);
+    var prevStartIso = isoDate(prevWeekStart);
+    var prevEndIso = isoDate(addDays(prevWeekStart, 6));
+
+    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness')
+      .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
+    var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
+      .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
+
+    if (thisWeekRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load workouts: ' + thisWeekRes.error.message + '</td></tr>'; return; }
+
+    var thisWeekWorkouts = thisWeekRes.data || [];
+    var prevWeekWorkouts = (prevWeekRes.data) || [];
+
+    var thisIds = thisWeekWorkouts.map(function(w){ return w.id; });
+    var prevIds = prevWeekWorkouts.map(function(w){ return w.id; });
+
+    var thisSets = [], prevSets = [];
+    if (thisIds.length){
+      var r1 = await sb.from('workout_sets').select('workout_id,exercise,reps,weight').in('workout_id', thisIds);
+      thisSets = r1.data || [];
+    }
+    if (prevIds.length){
+      var r2 = await sb.from('workout_sets').select('workout_id,exercise,reps,weight').in('workout_id', prevIds);
+      prevSets = r2.data || [];
+    }
+
+    var byAthlete = {};
+    athletesCache.forEach(function(a){ byAthlete[a.id] = {mon:null, wed:null, fri:null}; });
+    thisWeekWorkouts.forEach(function(w){
+      if (!byAthlete[w.athlete_id]) byAthlete[w.athlete_id] = {mon:null, wed:null, fri:null};
+      if (w.workout_type === 'mon' || w.workout_type === 'wed' || w.workout_type === 'fri'){
+        byAthlete[w.athlete_id][w.workout_type] = w;
+      }
+    });
+
+    var priorWorkoutToAthlete = {};
+    prevWeekWorkouts.forEach(function(w){ priorWorkoutToAthlete[w.id] = w.athlete_id; });
+    var priorBest = {};
+    prevSets.forEach(function(s){
+      var athleteId = priorWorkoutToAthlete[s.workout_id];
+      if (!athleteId) return;
+      var key = athleteId + '|' + s.exercise;
+      var w = parseNum(s.weight), r = parseNum(s.reps);
+      if (!priorBest[key]) priorBest[key] = {weight:null, reps:null};
+      if (w != null && (priorBest[key].weight == null || w > priorBest[key].weight)) priorBest[key].weight = w;
+      if (r != null && (priorBest[key].reps == null || r > priorBest[key].reps)) priorBest[key].reps = r;
+    });
+
+    var thisSetsByWorkout = {};
+    thisSets.forEach(function(s){
+      if (!thisSetsByWorkout[s.workout_id]) thisSetsByWorkout[s.workout_id] = [];
+      thisSetsByWorkout[s.workout_id].push(s);
+    });
+
+    var DROP_THRESHOLD = 0.9;
+
+    var html = '';
+    athletesCache.forEach(function(a){
+      var days = byAthlete[a.id];
+      var flagDetails = [];
+
+      ['mon','wed','fri'].forEach(function(dayKey){
+        var w = days[dayKey];
+        if (!w) return;
+        var sets = thisSetsByWorkout[w.id] || [];
+        sets.forEach(function(s){
+          var key = a.id + '|' + s.exercise;
+          var prior = priorBest[key];
+          if (!prior) return;
+          var curW = parseNum(s.weight), curR = parseNum(s.reps);
+          var weightDropped = (prior.weight != null && curW != null && curW < prior.weight * DROP_THRESHOLD);
+          var repsDropped = (prior.reps != null && curR != null && curR < prior.reps * DROP_THRESHOLD);
+          if (weightDropped || repsDropped){
+            flagDetails.push(s.exercise + ': ' + (s.weight||'-') + ' x ' + (s.reps||'-') + ' this week vs ' + (prior.weight||'-') + ' x ' + (prior.reps||'-') + ' last week');
+          }
+        });
+      });
+
+      function cellFor(dayKey){
+        var w = days[dayKey];
+        if (!w) return '<span class="checkbox"></span>';
+        var feel = w.readiness && w.readiness.feel;
+        var cls = feel ? feel : (w.completed ? 'done' : '');
+        var mark = w.completed ? '&#10003;' : '';
+        return '<span class="checkbox ' + cls + '">' + mark + '</span>';
+      }
+
+      var rowId = 'row-' + a.id;
+      html += '<tr onclick="toggleDetail(\'' + rowId + '\')">';
+      html += '<td class="name-cell">' + a.name + '</td>';
+      html += '<td>' + cellFor('mon') + '</td>';
+      html += '<td>' + cellFor('wed') + '</td>';
+      html += '<td>' + cellFor('fri') + '</td>';
+      html += '<td>' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
+      html += '</tr>';
+      html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
+      if (!flagDetails.length){
+        html += '<p class="small">No drops flagged vs. last week.</p>';
+      } else {
+        flagDetails.forEach(function(f){
+          html += '<div class="detail-ex flagged">\u26A0 ' + f + '</div>';
+        });
+      }
+      html += '</td></tr>';
+    });
+
+    bodyEl.innerHTML = html;
+  }
+
+  window.toggleDetail = function(rowId){
+    var el = document.getElementById(rowId);
+    if (!el) return;
+    var isOpen = el.classList.contains('open');
+    el.classList.toggle('open');
+    el.style.display = isOpen ? 'none' : 'table-row';
+  };
+
+  sb.auth.getSession().then(function(res){
+    if (res.data.session) loadProfileAndStart();
+  });
+</script>
+
+</body>
+</html>
