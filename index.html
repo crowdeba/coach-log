@@ -54,6 +54,7 @@
   .checkbox.tough{background:var(--amber); border-color:var(--amber);}
   .checkbox.too-much{background:var(--red); border-color:var(--red);}
   .checkbox.done{background:var(--slate-light); border-color:var(--slate-light);}
+  .checkbox.excused{background:#fff; border:2px solid var(--red); color:var(--red); font-size:11px;}
   .flag-badge{background:var(--red); color:#fff; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em; display:inline-block;}
   .checkbox{position:relative;}
   .note-dot{position:absolute; top:-2px; right:-2px; width:8px; height:8px; border-radius:50%; background:var(--charcoal); border:1.5px solid #fff;}
@@ -61,8 +62,12 @@
   .modal-overlay.open{display:flex;}
   .modal-box{background:#fff; border-radius:10px; padding:20px; max-width:380px; width:100%; box-shadow:var(--shadow-lg);}
   .modal-box h3{margin-bottom:2px;}
-  .modal-toggle-row{display:flex; align-items:center; gap:10px; margin:14px 0;}
-  .modal-toggle-row input[type="checkbox"]{width:20px; height:20px;}
+  .status-options{display:flex; flex-direction:column; gap:8px; margin:12px 0 14px;}
+  .status-option{display:flex; align-items:center; gap:10px; border:1.5px solid var(--border); border-radius:8px; padding:10px 12px; cursor:pointer;}
+  .status-option input{width:16px; height:16px;}
+  .status-option-excused.selected{border-color:var(--red); background:#FCEBEB;}
+  .status-option.selected:not(.status-option-excused){border-color:var(--charcoal);}
+  .status-hint{font-size:11px; color:#993C1D; margin-left:auto;}
   .modal-box textarea{width:100%; border:1.5px solid var(--border); border-radius:6px; padding:8px; font-size:13.5px; font-family:inherit; min-height:70px; resize:vertical;}
   .modal-actions{display:flex; gap:8px; margin-top:14px;}
   .modal-actions button{flex:1; border:none; border-radius:8px; padding:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;}
@@ -73,6 +78,9 @@
   .detail-panel td{border-bottom:1px solid var(--border); text-align:left;}
   .detail-ex{padding:4px 0; font-size:13px;}
   .detail-ex.flagged{color:var(--red); font-weight:700;}
+  .season-total{margin-bottom:10px;}
+  .season-total-num{font-size:20px; font-weight:800; color:var(--charcoal); margin:0;}
+  .season-total-of{font-size:13px; font-weight:400; color:var(--slate);}
   .legend{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px;}
   .legend-item{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--slate);}
   .legend-dot{width:12px; height:12px; border-radius:3px;}
@@ -113,6 +121,7 @@
       <div class="legend-item"><div class="legend-dot" style="background:var(--red);"></div>Too Much</div>
       <div class="legend-item"><div class="legend-dot" style="background:var(--slate-light);"></div>Done, no check-in</div>
       <div class="legend-item"><div class="legend-dot" style="background:#fff; border:1.5px solid var(--border);"></div>Not logged yet</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fff; border:2px solid var(--red);"></div>Excused</div>
     </div>
     <p class="small" style="margin-bottom:14px; color:var(--slate-light);">Tap any box to mark it yourself or add a private note &mdash; a small dot means there's already a note on that day.</p>
 
@@ -136,13 +145,24 @@
 <div class="modal-overlay" id="day-modal">
   <div class="modal-box">
     <h3 id="day-modal-title">Athlete &middot; Day</h3>
-    <p class="small">Mark this yourself if they didn't submit it &mdash; sick, forgot, whatever the reason. The note is private, only you see it.</p>
-    <div class="modal-toggle-row">
-      <input type="checkbox" id="day-modal-completed">
-      <label for="day-modal-completed" class="small" style="margin:0;">Mark as complete</label>
+    <p class="small">What actually happened this day?</p>
+    <div class="status-options">
+      <label class="status-option" id="opt-completed">
+        <input type="radio" name="day-status" value="completed">
+        <span class="small">Completed</span>
+      </label>
+      <label class="status-option status-option-excused" id="opt-excused">
+        <input type="radio" name="day-status" value="excused">
+        <span class="small" style="font-weight:700;">Excused</span>
+        <span class="status-hint">doesn't count against them</span>
+      </label>
+      <label class="status-option" id="opt-neither">
+        <input type="radio" name="day-status" value="neither">
+        <span class="small">Neither / missed</span>
+      </label>
     </div>
-    <label class="field-label">Note</label>
-    <textarea id="day-modal-note" placeholder="e.g. Sick, excused from lifting this week"></textarea>
+    <label class="field-label">Note (private, only you see this)</label>
+    <textarea id="day-modal-note" placeholder="e.g. Dentist appointment, told me in advance"></textarea>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeDayEditor()">Cancel</button>
       <button class="modal-save" onclick="saveDayEditor()">Save</button>
@@ -254,7 +274,7 @@
     var prevStartIso = isoDate(prevWeekStart);
     var prevEndIso = isoDate(addDays(prevWeekStart, 6));
 
-    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note')
+    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused')
       .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
     var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
       .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
@@ -332,17 +352,18 @@
       function cellFor(dayKey){
         var w = days[dayKey];
         var feel = w && w.readiness && w.readiness.feel;
-        var cls = w ? (feel ? feel : (w.completed ? 'done' : '')) : '';
-        var mark = w && w.completed ? '&#10003;' : '';
+        var cls = w ? (w.excused ? 'excused' : (feel ? feel : (w.completed ? 'done' : ''))) : '';
+        var mark = w && w.excused ? 'E' : (w && w.completed ? '&#10003;' : '');
         var noteDot = w && w.coach_note ? '<span class="note-dot"></span>' : '';
         var workoutId = w ? w.id : '';
         var completedFlag = w && w.completed ? '1' : '0';
+        var excusedFlag = w && w.excused ? '1' : '0';
         var noteVal = w && w.coach_note ? w.coach_note.replace(/'/g,"\\'").replace(/\n/g,'\\n') : '';
-        return '<span class="checkbox ' + cls + '" onclick="event.stopPropagation(); openDayEditor(\'' + a.id + '\', \'' + a.name.replace(/'/g,"\\'") + '\', \'' + dayKey + '\', \'' + workoutId + '\', ' + completedFlag + ', \'' + noteVal + '\')">' + mark + noteDot + '</span>';
+        return '<span class="checkbox ' + cls + '" onclick="event.stopPropagation(); openDayEditor(\'' + a.id + '\', \'' + a.name.replace(/'/g,"\\'") + '\', \'' + dayKey + '\', \'' + workoutId + '\', ' + completedFlag + ', ' + excusedFlag + ', \'' + noteVal + '\')">' + mark + noteDot + '</span>';
       }
 
       var rowId = 'row-' + a.id;
-      html += '<tr onclick="toggleDetail(\'' + rowId + '\')">';
+      html += '<tr onclick="toggleDetail(\'' + rowId + '\', \'' + a.id + '\')">';
       html += '<td class="name-cell">' + a.name + '</td>';
       html += '<td>' + cellFor('mon') + '</td>';
       html += '<td>' + cellFor('wed') + '</td>';
@@ -350,6 +371,7 @@
       html += '<td>' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
       html += '</tr>';
       html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
+      html += '<div id="total-' + a.id + '" class="season-total">Loading total&hellip;</div>';
       if (!flagDetails.length){
         html += '<p class="small">No drops flagged vs. last week.</p>';
       } else {
@@ -363,24 +385,69 @@
     bodyEl.innerHTML = html;
   }
 
-  window.toggleDetail = function(rowId){
+  var seasonTotalCache = {};
+  var SEASON_START = new Date(2026, 8, 7); // Sep 7, 2026 — shared team season start
+
+  window.toggleDetail = function(rowId, athleteId){
     var el = document.getElementById(rowId);
     if (!el) return;
     var isOpen = el.classList.contains('open');
     el.classList.toggle('open');
     el.style.display = isOpen ? 'none' : 'table-row';
+    if (!isOpen && athleteId) loadSeasonTotal(athleteId);
   };
+
+  async function loadSeasonTotal(athleteId){
+    var el = document.getElementById('total-' + athleteId);
+    if (!el) return;
+    if (seasonTotalCache[athleteId]){
+      el.innerHTML = seasonTotalCache[athleteId];
+      return;
+    }
+    var today = todayMid();
+    var dates = [];
+    var d = new Date(SEASON_START);
+    while (d <= today){
+      var wd = d.getDay();
+      if (wd===1||wd===3||wd===5) dates.push(new Date(d));
+      d = addDays(d, 1);
+    }
+    var isoDates = dates.map(function(dt){ return isoDate(dt); });
+    var res = await sb.from('workouts').select('workout_date,completed,excused').eq('athlete_id', athleteId).in('workout_date', isoDates);
+    if (res.error){ el.innerHTML = '<p class="small">Could not load total.</p>'; return; }
+    var byDate = {};
+    (res.data||[]).forEach(function(w){ byDate[w.workout_date] = w; });
+    var excusedCount = 0, completedCount = 0;
+    isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].excused) excusedCount++; });
+    var total = isoDates.length - excusedCount;
+    isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].completed && !byDate[iso].excused) completedCount++; });
+    var html = '<p class="season-total-num">' + completedCount + ' <span class="season-total-of">of ' + total + ' lifts since Sep 7</span></p>';
+    seasonTotalCache[athleteId] = html;
+    el.innerHTML = html;
+  }
 
   var dayEditorContext = null;
   var DAY_OFFSET = { mon:0, wed:2, fri:4 };
 
-  window.openDayEditor = function(athleteId, athleteName, dayKey, workoutId, completed, note){
+  window.openDayEditor = function(athleteId, athleteName, dayKey, workoutId, completed, excused, note){
     dayEditorContext = { athleteId: athleteId, dayKey: dayKey, workoutId: workoutId || null };
     document.getElementById('day-modal-title').textContent = athleteName + ' \u00b7 ' + dayKey.charAt(0).toUpperCase() + dayKey.slice(1);
-    document.getElementById('day-modal-completed').checked = !!completed;
+    var status = excused ? 'excused' : (completed ? 'completed' : 'neither');
+    document.querySelectorAll('input[name="day-status"]').forEach(function(r){
+      r.checked = (r.value === status);
+      r.closest('.status-option').classList.toggle('selected', r.value === status);
+    });
     document.getElementById('day-modal-note').value = note || '';
     document.getElementById('day-modal').classList.add('open');
   };
+
+  document.addEventListener('change', function(e){
+    if (e.target.name === 'day-status'){
+      document.querySelectorAll('input[name="day-status"]').forEach(function(r){
+        r.closest('.status-option').classList.toggle('selected', r.checked);
+      });
+    }
+  });
 
   window.closeDayEditor = function(){
     document.getElementById('day-modal').classList.remove('open');
@@ -389,11 +456,14 @@
 
   window.saveDayEditor = async function(){
     if (!dayEditorContext) return;
-    var completed = document.getElementById('day-modal-completed').checked;
+    var statusEl = document.querySelector('input[name="day-status"]:checked');
+    var status = statusEl ? statusEl.value : 'neither';
+    var completed = status === 'completed';
+    var excused = status === 'excused';
     var note = document.getElementById('day-modal-note').value.trim();
 
     if (dayEditorContext.workoutId){
-      await sb.from('workouts').update({ completed: completed, coach_note: note || null }).eq('id', dayEditorContext.workoutId);
+      await sb.from('workouts').update({ completed: completed, excused: excused, coach_note: note || null }).eq('id', dayEditorContext.workoutId);
     } else {
       var dayDate = addDays(currentWeekStart, DAY_OFFSET[dayEditorContext.dayKey]);
       await sb.from('workouts').insert({
@@ -401,6 +471,7 @@
         workout_type: dayEditorContext.dayKey,
         workout_date: isoDate(dayDate),
         completed: completed,
+        excused: excused,
         coach_note: note || null
       });
     }
