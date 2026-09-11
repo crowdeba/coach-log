@@ -55,6 +55,19 @@
   .checkbox.too-much{background:var(--red); border-color:var(--red);}
   .checkbox.done{background:var(--slate-light); border-color:var(--slate-light);}
   .flag-badge{background:var(--red); color:#fff; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em; display:inline-block;}
+  .checkbox{position:relative;}
+  .note-dot{position:absolute; top:-2px; right:-2px; width:8px; height:8px; border-radius:50%; background:var(--charcoal); border:1.5px solid #fff;}
+  .modal-overlay{display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:100; align-items:center; justify-content:center; padding:20px;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{background:#fff; border-radius:10px; padding:20px; max-width:380px; width:100%; box-shadow:var(--shadow-lg);}
+  .modal-box h3{margin-bottom:2px;}
+  .modal-toggle-row{display:flex; align-items:center; gap:10px; margin:14px 0;}
+  .modal-toggle-row input[type="checkbox"]{width:20px; height:20px;}
+  .modal-box textarea{width:100%; border:1.5px solid var(--border); border-radius:6px; padding:8px; font-size:13.5px; font-family:inherit; min-height:70px; resize:vertical;}
+  .modal-actions{display:flex; gap:8px; margin-top:14px;}
+  .modal-actions button{flex:1; border:none; border-radius:8px; padding:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;}
+  .modal-save{background:var(--red); color:#fff;}
+  .modal-cancel{background:var(--border); color:var(--ink);}
   .detail-panel{display:none; padding:10px 14px 14px; background:#FAFAFA;}
   .detail-panel.open{display:table-row;}
   .detail-panel td{border-bottom:1px solid var(--border); text-align:left;}
@@ -101,6 +114,7 @@
       <div class="legend-item"><div class="legend-dot" style="background:var(--slate-light);"></div>Done, no check-in</div>
       <div class="legend-item"><div class="legend-dot" style="background:#fff; border:1.5px solid var(--border);"></div>Not logged yet</div>
     </div>
+    <p class="small" style="margin-bottom:14px; color:var(--slate-light);">Tap any box to mark it yourself or add a private note &mdash; a small dot means there's already a note on that day.</p>
 
     <div class="card accent-charcoal">
       <table class="roster">
@@ -115,6 +129,23 @@
         </thead>
         <tbody id="roster-body"><tr><td colspan="5" class="small">Loading...</td></tr></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="day-modal">
+  <div class="modal-box">
+    <h3 id="day-modal-title">Athlete &middot; Day</h3>
+    <p class="small">Mark this yourself if they didn't submit it &mdash; sick, forgot, whatever the reason. The note is private, only you see it.</p>
+    <div class="modal-toggle-row">
+      <input type="checkbox" id="day-modal-completed">
+      <label for="day-modal-completed" class="small" style="margin:0;">Mark as complete</label>
+    </div>
+    <label class="field-label">Note</label>
+    <textarea id="day-modal-note" placeholder="e.g. Sick, excused from lifting this week"></textarea>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeDayEditor()">Cancel</button>
+      <button class="modal-save" onclick="saveDayEditor()">Save</button>
     </div>
   </div>
 </div>
@@ -223,7 +254,7 @@
     var prevStartIso = isoDate(prevWeekStart);
     var prevEndIso = isoDate(addDays(prevWeekStart, 6));
 
-    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness')
+    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note')
       .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
     var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
       .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
@@ -300,11 +331,14 @@
 
       function cellFor(dayKey){
         var w = days[dayKey];
-        if (!w) return '<span class="checkbox"></span>';
-        var feel = w.readiness && w.readiness.feel;
-        var cls = feel ? feel : (w.completed ? 'done' : '');
-        var mark = w.completed ? '&#10003;' : '';
-        return '<span class="checkbox ' + cls + '">' + mark + '</span>';
+        var feel = w && w.readiness && w.readiness.feel;
+        var cls = w ? (feel ? feel : (w.completed ? 'done' : '')) : '';
+        var mark = w && w.completed ? '&#10003;' : '';
+        var noteDot = w && w.coach_note ? '<span class="note-dot"></span>' : '';
+        var workoutId = w ? w.id : '';
+        var completedFlag = w && w.completed ? '1' : '0';
+        var noteVal = w && w.coach_note ? w.coach_note.replace(/'/g,"\\'").replace(/\n/g,'\\n') : '';
+        return '<span class="checkbox ' + cls + '" onclick="event.stopPropagation(); openDayEditor(\'' + a.id + '\', \'' + a.name.replace(/'/g,"\\'") + '\', \'' + dayKey + '\', \'' + workoutId + '\', ' + completedFlag + ', \'' + noteVal + '\')">' + mark + noteDot + '</span>';
       }
 
       var rowId = 'row-' + a.id;
@@ -335,6 +369,43 @@
     var isOpen = el.classList.contains('open');
     el.classList.toggle('open');
     el.style.display = isOpen ? 'none' : 'table-row';
+  };
+
+  var dayEditorContext = null;
+  var DAY_OFFSET = { mon:0, wed:2, fri:4 };
+
+  window.openDayEditor = function(athleteId, athleteName, dayKey, workoutId, completed, note){
+    dayEditorContext = { athleteId: athleteId, dayKey: dayKey, workoutId: workoutId || null };
+    document.getElementById('day-modal-title').textContent = athleteName + ' \u00b7 ' + dayKey.charAt(0).toUpperCase() + dayKey.slice(1);
+    document.getElementById('day-modal-completed').checked = !!completed;
+    document.getElementById('day-modal-note').value = note || '';
+    document.getElementById('day-modal').classList.add('open');
+  };
+
+  window.closeDayEditor = function(){
+    document.getElementById('day-modal').classList.remove('open');
+    dayEditorContext = null;
+  };
+
+  window.saveDayEditor = async function(){
+    if (!dayEditorContext) return;
+    var completed = document.getElementById('day-modal-completed').checked;
+    var note = document.getElementById('day-modal-note').value.trim();
+
+    if (dayEditorContext.workoutId){
+      await sb.from('workouts').update({ completed: completed, coach_note: note || null }).eq('id', dayEditorContext.workoutId);
+    } else {
+      var dayDate = addDays(currentWeekStart, DAY_OFFSET[dayEditorContext.dayKey]);
+      await sb.from('workouts').insert({
+        athlete_id: dayEditorContext.athleteId,
+        workout_type: dayEditorContext.dayKey,
+        workout_date: isoDate(dayDate),
+        completed: completed,
+        coach_note: note || null
+      });
+    }
+    closeDayEditor();
+    renderWeek();
   };
 
   sb.auth.getSession().then(function(res){
