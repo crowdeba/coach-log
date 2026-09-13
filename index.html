@@ -276,7 +276,7 @@
     var prevStartIso = isoDate(prevWeekStart);
     var prevEndIso = isoDate(addDays(prevWeekStart, 6));
 
-    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused,flagged_exercises')
+    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused,flagged_exercises,exercises_planned,exercises_completed')
       .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
     var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
       .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
@@ -338,6 +338,15 @@
       var days = byAthlete[a.id];
       var flagDetails = [];
       var flaggedExNames = [];
+      var exPlannedSum = 0, exCompletedSum = 0, hasAnyExCounts = false;
+      ['mon','wed','fri'].forEach(function(dayKey){
+        var w = days[dayKey];
+        if (w && w.exercises_planned != null){
+          exPlannedSum += w.exercises_planned;
+          exCompletedSum += w.exercises_completed || 0;
+          hasAnyExCounts = true;
+        }
+      });
       ['mon','wed','fri'].forEach(function(dayKey){
         var w = days[dayKey];
         if (w && w.flagged_exercises){
@@ -407,7 +416,9 @@
       html += '<td>' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
       html += '</tr>';
       html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
-      html += '<div id="total-' + a.id + '" class="season-total">Loading total&hellip;</div>';
+      if (hasAnyExCounts){
+        html += '<div class="season-total"><p class="season-total-num">' + exCompletedSum + ' <span class="season-total-of">of ' + exPlannedSum + ' exercises this week</span></p></div>';
+      }
       if (flaggedExNames.length){
         html += '<div class="detail-ex" style="color:var(--charcoal); font-weight:700; margin-bottom:6px;">&#9873; Flagged to discuss: ' + flaggedExNames.join(', ') + '</div>';
       }
@@ -441,52 +452,13 @@
     renderWeek();
   };
 
-  var seasonTotalCache = {};
-  var SEASON_START = new Date(2026, 8, 7); // Sep 7, 2026 — shared team season start
-
-  window.toggleDetail = function(rowId, athleteId){
+  window.toggleDetail = function(rowId){
     var el = document.getElementById(rowId);
     if (!el) return;
     var isOpen = el.classList.contains('open');
     el.classList.toggle('open');
     el.style.display = isOpen ? 'none' : 'table-row';
-    if (!isOpen && athleteId) loadSeasonTotal(athleteId);
   };
-
-  async function loadSeasonTotal(athleteId){
-    var el = document.getElementById('total-' + athleteId);
-    if (!el) return;
-    if (seasonTotalCache[athleteId]){
-      el.innerHTML = seasonTotalCache[athleteId];
-      return;
-    }
-    try {
-      var today = new Date();
-      today.setHours(0,0,0,0);
-      var dates = [];
-      var d = new Date(SEASON_START);
-      while (d <= today){
-        var wd = d.getDay();
-        if (wd===1||wd===3||wd===5) dates.push(new Date(d));
-        d = addDays(d, 1);
-      }
-      if (!dates.length){ el.innerHTML = '<p class="small">No dates in range yet.</p>'; return; }
-      var isoDates = dates.map(function(dt){ return isoDate(dt); });
-      var res = await sb.from('workouts').select('workout_date,completed,excused').eq('athlete_id', athleteId).in('workout_date', isoDates);
-      if (res.error){ el.innerHTML = '<p class="small">Could not load total: ' + res.error.message + '</p>'; return; }
-      var byDate = {};
-      (res.data||[]).forEach(function(w){ byDate[w.workout_date] = w; });
-      var excusedCount = 0, completedCount = 0;
-      isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].excused) excusedCount++; });
-      var total = isoDates.length - excusedCount;
-      isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].completed && !byDate[iso].excused) completedCount++; });
-      var html = '<p class="season-total-num">' + completedCount + ' <span class="season-total-of">of ' + total + ' lifts since Sep 7</span></p>';
-      seasonTotalCache[athleteId] = html;
-      el.innerHTML = html;
-    } catch(e){
-      el.innerHTML = '<p class="small">Could not load total: ' + e.message + '</p>';
-    }
-  }
 
   var dayEditorContext = null;
   var DAY_OFFSET = { mon:0, wed:2, fri:4 };
