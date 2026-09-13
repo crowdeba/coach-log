@@ -78,6 +78,8 @@
   .detail-panel td{border-bottom:1px solid var(--border); text-align:left;}
   .detail-ex{padding:4px 0; font-size:13px;}
   .detail-ex.flagged{color:var(--red); font-weight:700;}
+  .dismiss-flag-btn{background:none; border:1px solid var(--border); color:var(--slate); font-size:10.5px; padding:4px 8px; border-radius:10px; cursor:pointer; font-family:inherit; flex-shrink:0; text-transform:uppercase; letter-spacing:0.03em;}
+  .dismiss-flag-btn:hover{border-color:var(--red); color:var(--red);}
   .season-total{margin-bottom:10px;}
   .season-total-num{font-size:20px; font-weight:800; color:var(--charcoal); margin:0;}
   .season-total-of{font-size:13px; font-weight:400; color:var(--slate);}
@@ -274,7 +276,7 @@
     var prevStartIso = isoDate(prevWeekStart);
     var prevEndIso = isoDate(addDays(prevWeekStart, 6));
 
-    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused')
+    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused,flagged_exercises')
       .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
     var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
       .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
@@ -326,11 +328,22 @@
     });
 
     var DROP_THRESHOLD = 0.9;
+    var dismissedFlags = loadDismissedFlags();
+    var weekKey = isoDate(currentWeekStart);
+    var today = new Date();
+    today.setHours(0,0,0,0);
 
     var html = '';
     athletesCache.forEach(function(a){
       var days = byAthlete[a.id];
       var flagDetails = [];
+      var flaggedExNames = [];
+      ['mon','wed','fri'].forEach(function(dayKey){
+        var w = days[dayKey];
+        if (w && w.flagged_exercises){
+          w.flagged_exercises.split(', ').forEach(function(n){ if (flaggedExNames.indexOf(n) === -1) flaggedExNames.push(n); });
+        }
+      });
 
       ['mon','wed','fri'].forEach(function(dayKey){
         var w = days[dayKey];
@@ -344,10 +357,33 @@
           var weightDropped = (prior.weight != null && curW != null && curW < prior.weight * DROP_THRESHOLD);
           var repsDropped = (prior.reps != null && curR != null && curR < prior.reps * DROP_THRESHOLD);
           if (weightDropped || repsDropped){
-            flagDetails.push(s.exercise + ': ' + (s.weight||'-') + ' x ' + (s.reps||'-') + ' this week vs ' + (prior.weight||'-') + ' x ' + (prior.reps||'-') + ' last week');
+            var dropId = a.id + '|' + weekKey + '|drop|' + s.exercise;
+            flagDetails.push({ id: dropId, text: s.exercise + ': ' + (s.weight||'-') + ' x ' + (s.reps||'-') + ' this week vs ' + (prior.weight||'-') + ' x ' + (prior.reps||'-') + ' last week' });
           }
         });
       });
+
+      var missedCount = 0, tooMuchCount = 0;
+      ['mon','wed','fri'].forEach(function(dayKey){
+        var w = days[dayKey];
+        var dayDate = addDays(currentWeekStart, DAY_OFFSET[dayKey]);
+        if (dayDate > today) return;
+        if (w && (w.completed || w.excused)) return;
+        missedCount++;
+      });
+      ['mon','wed','fri'].forEach(function(dayKey){
+        var w = days[dayKey];
+        if (w && w.readiness && w.readiness.feel === 'too-much') tooMuchCount++;
+      });
+
+      if (missedCount >= 2){
+        flagDetails.push({ id: a.id+'|'+weekKey+'|missed', text: 'Missed ' + missedCount + ' of 3 possible lifts this week' });
+      }
+      if (tooMuchCount >= 2){
+        flagDetails.push({ id: a.id+'|'+weekKey+'|toomuch', text: 'Reported "Too Much" ' + tooMuchCount + ' times this week' });
+      }
+
+      flagDetails = flagDetails.filter(function(f){ return !dismissedFlags[f.id]; });
 
       function cellFor(dayKey){
         var w = days[dayKey];
@@ -372,11 +408,17 @@
       html += '</tr>';
       html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
       html += '<div id="total-' + a.id + '" class="season-total">Loading total&hellip;</div>';
+      if (flaggedExNames.length){
+        html += '<div class="detail-ex" style="color:var(--charcoal); font-weight:700; margin-bottom:6px;">&#9873; Flagged to discuss: ' + flaggedExNames.join(', ') + '</div>';
+      }
       if (!flagDetails.length){
-        html += '<p class="small">No drops flagged vs. last week.</p>';
+        html += '<p class="small">Nothing flagged this week.</p>';
       } else {
         flagDetails.forEach(function(f){
-          html += '<div class="detail-ex flagged">\u26A0 ' + f + '</div>';
+          html += '<div class="detail-ex flagged" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">';
+          html += '<span>\u26A0 ' + f.text + '</span>';
+          html += '<button class="dismiss-flag-btn" onclick="event.stopPropagation(); dismissFlag(\'' + f.id + '\')">Dismiss</button>';
+          html += '</div>';
         });
       }
       html += '</td></tr>';
@@ -384,6 +426,20 @@
 
     bodyEl.innerHTML = html;
   }
+
+  var DISMISSED_FLAGS_KEY = 'coachlog_dismissed_flags';
+  function loadDismissedFlags(){
+    try {
+      var raw = localStorage.getItem(DISMISSED_FLAGS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch(e){ return {}; }
+  }
+  window.dismissFlag = function(flagId){
+    var dismissed = loadDismissedFlags();
+    dismissed[flagId] = true;
+    try { localStorage.setItem(DISMISSED_FLAGS_KEY, JSON.stringify(dismissed)); } catch(e){}
+    renderWeek();
+  };
 
   var seasonTotalCache = {};
   var SEASON_START = new Date(2026, 8, 7); // Sep 7, 2026 — shared team season start
@@ -404,26 +460,32 @@
       el.innerHTML = seasonTotalCache[athleteId];
       return;
     }
-    var today = todayMid();
-    var dates = [];
-    var d = new Date(SEASON_START);
-    while (d <= today){
-      var wd = d.getDay();
-      if (wd===1||wd===3||wd===5) dates.push(new Date(d));
-      d = addDays(d, 1);
+    try {
+      var today = new Date();
+      today.setHours(0,0,0,0);
+      var dates = [];
+      var d = new Date(SEASON_START);
+      while (d <= today){
+        var wd = d.getDay();
+        if (wd===1||wd===3||wd===5) dates.push(new Date(d));
+        d = addDays(d, 1);
+      }
+      if (!dates.length){ el.innerHTML = '<p class="small">No dates in range yet.</p>'; return; }
+      var isoDates = dates.map(function(dt){ return isoDate(dt); });
+      var res = await sb.from('workouts').select('workout_date,completed,excused').eq('athlete_id', athleteId).in('workout_date', isoDates);
+      if (res.error){ el.innerHTML = '<p class="small">Could not load total: ' + res.error.message + '</p>'; return; }
+      var byDate = {};
+      (res.data||[]).forEach(function(w){ byDate[w.workout_date] = w; });
+      var excusedCount = 0, completedCount = 0;
+      isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].excused) excusedCount++; });
+      var total = isoDates.length - excusedCount;
+      isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].completed && !byDate[iso].excused) completedCount++; });
+      var html = '<p class="season-total-num">' + completedCount + ' <span class="season-total-of">of ' + total + ' lifts since Sep 7</span></p>';
+      seasonTotalCache[athleteId] = html;
+      el.innerHTML = html;
+    } catch(e){
+      el.innerHTML = '<p class="small">Could not load total: ' + e.message + '</p>';
     }
-    var isoDates = dates.map(function(dt){ return isoDate(dt); });
-    var res = await sb.from('workouts').select('workout_date,completed,excused').eq('athlete_id', athleteId).in('workout_date', isoDates);
-    if (res.error){ el.innerHTML = '<p class="small">Could not load total.</p>'; return; }
-    var byDate = {};
-    (res.data||[]).forEach(function(w){ byDate[w.workout_date] = w; });
-    var excusedCount = 0, completedCount = 0;
-    isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].excused) excusedCount++; });
-    var total = isoDates.length - excusedCount;
-    isoDates.forEach(function(iso){ if (byDate[iso] && byDate[iso].completed && !byDate[iso].excused) completedCount++; });
-    var html = '<p class="season-total-num">' + completedCount + ' <span class="season-total-of">of ' + total + ' lifts since Sep 7</span></p>';
-    seasonTotalCache[athleteId] = html;
-    el.innerHTML = html;
   }
 
   var dayEditorContext = null;
