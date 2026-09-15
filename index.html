@@ -182,7 +182,7 @@
   var SUPABASE_ANON_KEY = "sb_publishable_v83BXXAIW3UoMrndPi4tCw_cMoaPbnR";
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   var auth = { user:null, role:null };
-  var currentWeekStart = null; // Date object, Monday of the viewed week
+  var currentWeekStart = null; // Date object, Sunday of the viewed week
   var athletesCache = null;
 
   window.doSignIn = async function(){
@@ -223,11 +223,10 @@
   }
 
   // ---------------- DATE HELPERS ----------------
-  function mondayOf(d){
+  function sundayOf(d){
     var day = d.getDay(); // 0=Sun...6=Sat
-    var diff = day === 0 ? -6 : 1 - day;
     var m = new Date(d);
-    m.setDate(d.getDate() + diff);
+    m.setDate(d.getDate() - day);
     m.setHours(0,0,0,0);
     return m;
   }
@@ -246,7 +245,7 @@
   }
 
   window.goToCurrentWeek = function(){
-    currentWeekStart = mondayOf(new Date());
+    currentWeekStart = sundayOf(new Date());
     renderWeek();
   };
   window.changeWeek = function(delta){
@@ -312,6 +311,20 @@
     });
     Object.keys(byAthlete).forEach(function(athleteId){
       byAthlete[athleteId].sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
+      var seenDates = {};
+      var deduped = [];
+      byAthlete[athleteId].forEach(function(w){
+        var existing = seenDates[w.workout_date];
+        if (!existing){
+          seenDates[w.workout_date] = w;
+          deduped.push(w);
+        } else if (existing.workout_type === 'manual' && w.workout_type !== 'manual'){
+          var idx = deduped.indexOf(existing);
+          deduped[idx] = w;
+          seenDates[w.workout_date] = w;
+        }
+      });
+      byAthlete[athleteId] = deduped;
     });
 
     var priorWorkoutToAthlete = {};
