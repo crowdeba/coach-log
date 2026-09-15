@@ -71,7 +71,7 @@
   .status-hint{font-size:11px; color:#993C1D; margin-left:auto;}
   .modal-box textarea{width:100%; border:1.5px solid var(--border); border-radius:6px; padding:8px; font-size:13.5px; font-family:inherit; min-height:70px; resize:vertical;}
   .modal-actions{display:flex; gap:8px; margin-top:14px;}
-  .modal-delete{width:100%; margin-top:10px; background:none; border:1.5px solid var(--red); color:var(--red); border-radius:8px; padding:9px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit;}
+  .modal-delete{width:100%; margin-bottom:12px; background:var(--red); border:none; color:#fff; border-radius:8px; padding:12px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit;}
   .modal-actions button{flex:1; border:none; border-radius:8px; padding:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;}
   .modal-save{background:var(--red); color:#fff;}
   .modal-cancel{background:var(--border); color:var(--ink);}
@@ -171,7 +171,8 @@
     </div>
     <label class="field-label">Note (private, only you see this)</label>
     <textarea id="day-modal-note" placeholder="e.g. Dentist appointment, told me in advance"></textarea>
-    <button id="day-modal-delete" class="modal-delete" style="display:none;" onclick="deleteDayEditor()">Remove this manual entry</button>
+    <button id="day-modal-delete" class="modal-delete" style="display:none;">&#128683; Hide from Coach Log</button>
+    <p class="small" id="day-modal-hide-note" style="display:none; margin:-6px 0 12px; color:var(--slate-light);">Only removes it from your view here &mdash; never touches their own history.</p>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeDayEditor()">Cancel</button>
       <button class="modal-save" onclick="saveDayEditor()">Save</button>
@@ -293,7 +294,8 @@
 
     if (thisWeekRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load workouts: ' + thisWeekRes.error.message + '</td></tr>'; return; }
 
-    var thisWeekWorkouts = thisWeekRes.data || [];
+    var hiddenEntries = loadHiddenEntries();
+    var thisWeekWorkouts = (thisWeekRes.data || []).filter(function(w){ return !hiddenEntries[w.id]; });
     var prevWeekWorkouts = (prevWeekRes.data) || [];
 
     var thisIds = thisWeekWorkouts.map(function(w){ return w.id; });
@@ -315,46 +317,22 @@
       if (!byAthlete[w.athlete_id]) byAthlete[w.athlete_id] = [];
       byAthlete[w.athlete_id].push(w);
     });
-    var EXPECTED_WD = { mon: 1, wed: 3, fri: 5 };
     Object.keys(byAthlete).forEach(function(athleteId){
-      var raw = byAthlete[athleteId];
-      raw.sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
-
-      var slots = [null, null, null]; // mon, wed, fri
-      var leftover = [];
-      var slotKeys = ['mon','wed','fri'];
-
-      raw.forEach(function(w){
-        var slotIdx = slotKeys.indexOf(w.workout_type);
-        if (slotIdx === -1){ leftover.push(w); return; }
-        if (!slots[slotIdx]){
-          slots[slotIdx] = w;
-        } else {
-          // Collision: prefer whichever entry's actual date matches the expected weekday
-          var existing = slots[slotIdx];
-          var existingWd = parseDate(existing.workout_date).getDay();
-          var newWd = parseDate(w.workout_date).getDay();
-          var expected = EXPECTED_WD[w.workout_type];
-          if (newWd === expected && existingWd !== expected){
-            leftover.push(existing);
-            slots[slotIdx] = w;
-          } else {
-            leftover.push(w);
-          }
+      byAthlete[athleteId].sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
+      var seenDates = {};
+      var deduped = [];
+      byAthlete[athleteId].forEach(function(w){
+        var existing = seenDates[w.workout_date];
+        if (!existing){
+          seenDates[w.workout_date] = w;
+          deduped.push(w);
+        } else if (existing.workout_type === 'manual' && w.workout_type !== 'manual'){
+          var idx = deduped.indexOf(existing);
+          deduped[idx] = w;
+          seenDates[w.workout_date] = w;
         }
       });
-
-      // Fill any still-empty slots with leftovers, in chronological order
-      leftover.sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
-      var overflow = [];
-      leftover.forEach(function(w){
-        var emptyIdx = slots.indexOf(null);
-        if (emptyIdx > -1){ slots[emptyIdx] = w; }
-        else { overflow.push(w); }
-      });
-
-      byAthlete[athleteId] = slots;
-      byAthlete[athleteId].overflow = overflow;
+      byAthlete[athleteId] = deduped;
     });
 
     var priorWorkoutToAthlete = {};
@@ -493,6 +471,22 @@
     renderWeek();
   };
 
+  var HIDDEN_ENTRIES_KEY = 'coachlog_hidden_entries';
+  function loadHiddenEntries(){
+    try {
+      var raw = localStorage.getItem(HIDDEN_ENTRIES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch(e){ return {}; }
+  }
+  window.hideEntryFromLog = function(workoutId){
+    if (!workoutId) return;
+    var hidden = loadHiddenEntries();
+    hidden[workoutId] = true;
+    try { localStorage.setItem(HIDDEN_ENTRIES_KEY, JSON.stringify(hidden)); } catch(e){}
+    closeDayEditor();
+    renderWeek();
+  };
+
   window.toggleDetail = function(rowId){
     var el = document.getElementById(rowId);
     if (!el) return;
@@ -512,13 +506,17 @@
     var dateField = document.getElementById('day-modal-datefield');
     var dateInput = document.getElementById('day-modal-date');
     var deleteBtn = document.getElementById('day-modal-delete');
+    var hideNote = document.getElementById('day-modal-hide-note');
     if (workoutId){
       dateField.style.display = 'none';
-      deleteBtn.style.display = (workoutType === 'manual') ? 'block' : 'none';
+      deleteBtn.style.display = 'block';
+      hideNote.style.display = 'block';
+      deleteBtn.onclick = function(){ hideEntryFromLog(workoutId); };
     } else {
       dateField.style.display = 'block';
       dateInput.value = isoDate(new Date());
       deleteBtn.style.display = 'none';
+      hideNote.style.display = 'none';
     }
     var status = excused ? 'excused' : (completed ? 'completed' : 'neither');
     document.querySelectorAll('input[name="day-status"]').forEach(function(r){
@@ -540,14 +538,6 @@
   window.closeDayEditor = function(){
     document.getElementById('day-modal').classList.remove('open');
     dayEditorContext = null;
-  };
-
-  window.deleteDayEditor = async function(){
-    if (!dayEditorContext || !dayEditorContext.workoutId) return;
-    await sb.from('workout_sets').delete().eq('workout_id', dayEditorContext.workoutId);
-    await sb.from('workouts').delete().eq('id', dayEditorContext.workoutId);
-    closeDayEditor();
-    renderWeek();
   };
 
   window.saveDayEditor = async function(){
