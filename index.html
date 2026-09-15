@@ -62,6 +62,7 @@
   .modal-overlay.open{display:flex;}
   .modal-box{background:#fff; border-radius:10px; padding:20px; max-width:380px; width:100%; box-shadow:var(--shadow-lg);}
   .modal-box h3{margin-bottom:2px;}
+  .field{width:100%; border:1.5px solid var(--border); border-radius:6px; padding:8px; font-size:14px; font-family:inherit;}
   .status-options{display:flex; flex-direction:column; gap:8px; margin:12px 0 14px;}
   .status-option{display:flex; align-items:center; gap:10px; border:1.5px solid var(--border); border-radius:8px; padding:10px 12px; cursor:pointer;}
   .status-option input{width:16px; height:16px;}
@@ -147,6 +148,10 @@
 <div class="modal-overlay" id="day-modal">
   <div class="modal-box">
     <h3 id="day-modal-title">Athlete &middot; Day</h3>
+    <div id="day-modal-datefield" style="display:none; margin-bottom:10px;">
+      <label class="field-label">Which date is this?</label>
+      <input type="date" id="day-modal-date" class="field">
+    </div>
     <p class="small">What actually happened this day?</p>
     <div class="status-options">
       <label class="status-option" id="opt-completed">
@@ -300,12 +305,13 @@
     }
 
     var byAthlete = {};
-    athletesCache.forEach(function(a){ byAthlete[a.id] = {mon:null, wed:null, fri:null}; });
+    athletesCache.forEach(function(a){ byAthlete[a.id] = []; });
     thisWeekWorkouts.forEach(function(w){
-      if (!byAthlete[w.athlete_id]) byAthlete[w.athlete_id] = {mon:null, wed:null, fri:null};
-      if (w.workout_type === 'mon' || w.workout_type === 'wed' || w.workout_type === 'fri'){
-        byAthlete[w.athlete_id][w.workout_type] = w;
-      }
+      if (!byAthlete[w.athlete_id]) byAthlete[w.athlete_id] = [];
+      byAthlete[w.athlete_id].push(w);
+    });
+    Object.keys(byAthlete).forEach(function(athleteId){
+      byAthlete[athleteId].sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
     });
 
     var priorWorkoutToAthlete = {};
@@ -339,24 +345,20 @@
       var flagDetails = [];
       var flaggedExNames = [];
       var exPlannedSum = 0, exCompletedSum = 0, hasAnyExCounts = false;
-      ['mon','wed','fri'].forEach(function(dayKey){
-        var w = days[dayKey];
-        if (w && w.exercises_planned != null){
+      days.forEach(function(w){
+        if (w.exercises_planned != null){
           exPlannedSum += w.exercises_planned;
           exCompletedSum += w.exercises_completed || 0;
           hasAnyExCounts = true;
         }
       });
-      ['mon','wed','fri'].forEach(function(dayKey){
-        var w = days[dayKey];
-        if (w && w.flagged_exercises){
+      days.forEach(function(w){
+        if (w.flagged_exercises){
           w.flagged_exercises.split(', ').forEach(function(n){ if (flaggedExNames.indexOf(n) === -1) flaggedExNames.push(n); });
         }
       });
 
-      ['mon','wed','fri'].forEach(function(dayKey){
-        var w = days[dayKey];
-        if (!w) return;
+      days.forEach(function(w){
         var sets = thisSetsByWorkout[w.id] || [];
         sets.forEach(function(s){
           var key = a.id + '|' + s.exercise;
@@ -372,18 +374,11 @@
         });
       });
 
-      var missedCount = 0, tooMuchCount = 0;
-      ['mon','wed','fri'].forEach(function(dayKey){
-        var w = days[dayKey];
-        var dayDate = addDays(currentWeekStart, DAY_OFFSET[dayKey]);
-        if (dayDate > today) return;
-        if (w && (w.completed || w.excused)) return;
-        missedCount++;
-      });
-      ['mon','wed','fri'].forEach(function(dayKey){
-        var w = days[dayKey];
-        if (w && w.readiness && w.readiness.feel === 'too-much') tooMuchCount++;
-      });
+      var weekEndDate = addDays(currentWeekStart, 6);
+      var completedCount = days.filter(function(w){ return w.completed && !w.excused; }).length;
+      var excusedCount = days.filter(function(w){ return w.excused; }).length;
+      var tooMuchCount = days.filter(function(w){ return w.readiness && w.readiness.feel === 'too-much'; }).length;
+      var missedCount = (weekEndDate < today) ? Math.max(0, 3 - completedCount - excusedCount) : 0;
 
       if (missedCount >= 2){
         flagDetails.push({ id: a.id+'|'+weekKey+'|missed', text: 'Missed ' + missedCount + ' of 3 possible lifts this week' });
@@ -394,8 +389,8 @@
 
       flagDetails = flagDetails.filter(function(f){ return !dismissedFlags[f.id]; });
 
-      function cellFor(dayKey){
-        var w = days[dayKey];
+      function cellFor(idx){
+        var w = days[idx];
         var feel = w && w.readiness && w.readiness.feel;
         var cls = w ? (w.excused ? 'excused' : (feel ? feel : (w.completed ? 'done' : ''))) : '';
         var mark = w && w.excused ? 'E' : (w && w.completed ? '&#10003;' : '');
@@ -404,15 +399,16 @@
         var completedFlag = w && w.completed ? '1' : '0';
         var excusedFlag = w && w.excused ? '1' : '0';
         var noteVal = w && w.coach_note ? w.coach_note.replace(/'/g,"\\'").replace(/\n/g,'\\n') : '';
-        return '<span class="checkbox ' + cls + '" onclick="event.stopPropagation(); openDayEditor(\'' + a.id + '\', \'' + a.name.replace(/'/g,"\\'") + '\', \'' + dayKey + '\', \'' + workoutId + '\', ' + completedFlag + ', ' + excusedFlag + ', \'' + noteVal + '\')">' + mark + noteDot + '</span>';
+        var dateVal = w ? w.workout_date : '';
+        return '<span class="checkbox ' + cls + '" onclick="event.stopPropagation(); openDayEditor(\'' + a.id + '\', \'' + a.name.replace(/'/g,"\\'") + '\', ' + (idx+1) + ', \'' + workoutId + '\', ' + completedFlag + ', ' + excusedFlag + ', \'' + noteVal + '\', \'' + dateVal + '\')">' + mark + noteDot + '</span>';
       }
 
       var rowId = 'row-' + a.id;
       html += '<tr onclick="toggleDetail(\'' + rowId + '\', \'' + a.id + '\')">';
       html += '<td class="name-cell">' + a.name + '</td>';
-      html += '<td>' + cellFor('mon') + '</td>';
-      html += '<td>' + cellFor('wed') + '</td>';
-      html += '<td>' + cellFor('fri') + '</td>';
+      html += '<td>' + cellFor(0) + '</td>';
+      html += '<td>' + cellFor(1) + '</td>';
+      html += '<td>' + cellFor(2) + '</td>';
       html += '<td>' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
       html += '</tr>';
       html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
@@ -463,9 +459,19 @@
   var dayEditorContext = null;
   var DAY_OFFSET = { mon:0, wed:2, fri:4 };
 
-  window.openDayEditor = function(athleteId, athleteName, dayKey, workoutId, completed, excused, note){
-    dayEditorContext = { athleteId: athleteId, dayKey: dayKey, workoutId: workoutId || null };
-    document.getElementById('day-modal-title').textContent = athleteName + ' \u00b7 ' + dayKey.charAt(0).toUpperCase() + dayKey.slice(1);
+  window.openDayEditor = function(athleteId, athleteName, liftIndex, workoutId, completed, excused, note, workoutDate){
+    dayEditorContext = { athleteId: athleteId, liftIndex: liftIndex, workoutId: workoutId || null };
+    var ordinal = liftIndex === 1 ? '1st' : (liftIndex === 2 ? '2nd' : '3rd');
+    var dateSuffix = workoutDate ? ' (' + workoutDate + ')' : '';
+    document.getElementById('day-modal-title').textContent = athleteName + ' \u00b7 ' + ordinal + ' Lift' + dateSuffix;
+    var dateField = document.getElementById('day-modal-datefield');
+    var dateInput = document.getElementById('day-modal-date');
+    if (workoutId){
+      dateField.style.display = 'none';
+    } else {
+      dateField.style.display = 'block';
+      dateInput.value = isoDate(new Date());
+    }
     var status = excused ? 'excused' : (completed ? 'completed' : 'neither');
     document.querySelectorAll('input[name="day-status"]').forEach(function(r){
       r.checked = (r.value === status);
@@ -499,11 +505,12 @@
     if (dayEditorContext.workoutId){
       await sb.from('workouts').update({ completed: completed, excused: excused, coach_note: note || null }).eq('id', dayEditorContext.workoutId);
     } else {
-      var dayDate = addDays(currentWeekStart, DAY_OFFSET[dayEditorContext.dayKey]);
+      var pickedDate = document.getElementById('day-modal-date').value;
+      if (!pickedDate) return;
       await sb.from('workouts').insert({
         athlete_id: dayEditorContext.athleteId,
-        workout_type: dayEditorContext.dayKey,
-        workout_date: isoDate(dayDate),
+        workout_type: 'manual',
+        workout_date: pickedDate,
         completed: completed,
         excused: excused,
         coach_note: note || null
