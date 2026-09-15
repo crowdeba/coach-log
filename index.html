@@ -287,15 +287,35 @@
     var prevStartIso = isoDate(prevWeekStart);
     var prevEndIso = isoDate(addDays(prevWeekStart, 6));
 
-    var thisWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused,flagged_exercises,exercises_planned,exercises_completed')
-      .gte('workout_date', weekStartIso).lte('workout_date', weekEndIso);
+    // Fetch a wider window (2 weeks back, 1 week forward) so late catch-ups
+    // logged inside this calendar week, but belonging to an earlier week,
+    // can still be found and correctly reattributed.
+    var wideStart = isoDate(addDays(currentWeekStart, -14));
+    var wideEnd = isoDate(addDays(currentWeekStart, 13));
+
+    var wideRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date,completed,readiness,coach_note,excused,flagged_exercises,exercises_planned,exercises_completed')
+      .gte('workout_date', wideStart).lte('workout_date', wideEnd);
     var prevWeekRes = await sb.from('workouts').select('id,athlete_id,workout_type,workout_date')
       .gte('workout_date', prevStartIso).lte('workout_date', prevEndIso);
 
-    if (thisWeekRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load workouts: ' + thisWeekRes.error.message + '</td></tr>'; return; }
+    if (wideRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load workouts: ' + wideRes.error.message + '</td></tr>'; return; }
+
+    var NATURAL_WD = { mon:1, wed:3, fri:5 };
+    function effectiveWeekStart(w){
+      var natural = NATURAL_WD[w.workout_type];
+      if (natural == null) return sundayOf(parseDate(w.workout_date));
+      var d = parseDate(w.workout_date);
+      var actualWd = d.getDay();
+      var back = actualWd - natural;
+      if (back < 0) back += 7;
+      var adjusted = addDays(d, -back);
+      return sundayOf(adjusted);
+    }
 
     var hiddenEntries = loadHiddenEntries();
-    var thisWeekWorkouts = (thisWeekRes.data || []).filter(function(w){ return !hiddenEntries[w.id]; });
+    var thisWeekWorkouts = (wideRes.data || [])
+      .filter(function(w){ return !hiddenEntries[w.id]; })
+      .filter(function(w){ return isoDate(effectiveWeekStart(w)) === weekStartIso; });
     var prevWeekWorkouts = (prevWeekRes.data) || [];
 
     var thisIds = thisWeekWorkouts.map(function(w){ return w.id; });
@@ -317,22 +337,22 @@
       if (!byAthlete[w.athlete_id]) byAthlete[w.athlete_id] = [];
       byAthlete[w.athlete_id].push(w);
     });
+    var SLOT_KEYS = ['mon','wed','fri'];
     Object.keys(byAthlete).forEach(function(athleteId){
-      byAthlete[athleteId].sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
-      var seenDates = {};
-      var deduped = [];
-      byAthlete[athleteId].forEach(function(w){
-        var existing = seenDates[w.workout_date];
-        if (!existing){
-          seenDates[w.workout_date] = w;
-          deduped.push(w);
-        } else if (existing.workout_type === 'manual' && w.workout_type !== 'manual'){
-          var idx = deduped.indexOf(existing);
-          deduped[idx] = w;
-          seenDates[w.workout_date] = w;
-        }
+      var raw = byAthlete[athleteId];
+      raw.sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
+      var slots = [null, null, null];
+      var leftover = [];
+      raw.forEach(function(w){
+        var idx = SLOT_KEYS.indexOf(w.workout_type);
+        if (idx === -1 || slots[idx]){ leftover.push(w); }
+        else { slots[idx] = w; }
       });
-      byAthlete[athleteId] = deduped;
+      leftover.forEach(function(w){
+        var emptyIdx = slots.indexOf(null);
+        if (emptyIdx > -1) slots[emptyIdx] = w;
+      });
+      byAthlete[athleteId] = slots;
     });
 
     var priorWorkoutToAthlete = {};
