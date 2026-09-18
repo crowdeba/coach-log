@@ -410,7 +410,7 @@
           var weightDropped = (prior.weight != null && curW != null && curW < prior.weight * DROP_THRESHOLD);
           var repsDropped = (prior.reps != null && curR != null && curR < prior.reps * DROP_THRESHOLD);
           if (weightDropped || repsDropped){
-            var dropId = a.id + '|' + weekKey + '|drop|' + s.exercise;
+            var dropId = a.id + '|' + weekKey + '|drop|' + s.exercise + '|' + s.set_number;
             flagDetails.push({ id: dropId, text: s.exercise + ': ' + (s.weight||'-') + ' x ' + (s.reps||'-') + ' this week vs ' + (prior.weight||'-') + ' x ' + (prior.reps||'-') + ' last week' });
           }
         });
@@ -452,7 +452,7 @@
       html += '<td>' + cellFor(0) + '</td>';
       html += '<td>' + cellFor(1) + '</td>';
       html += '<td>' + cellFor(2) + '</td>';
-      html += '<td>' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
+      html += '<td id="flagbadge-' + a.id + '">' + (flagDetails.length ? '<span class="flag-badge">' + flagDetails.length + '</span>' : '<span class="small">&mdash;</span>') + '</td>';
       html += '</tr>';
       html += '<tr class="detail-panel" id="' + rowId + '"><td colspan="5">';
       if (hasAnyExCounts){
@@ -461,16 +461,18 @@
       if (flaggedExNames.length){
         html += '<div class="detail-ex" style="color:var(--charcoal); font-weight:700; margin-bottom:6px;">&#9873; Flagged to discuss: ' + flaggedExNames.join(', ') + '</div>';
       }
+      html += '<div id="flaglist-' + a.id + '">';
       if (!flagDetails.length){
-        html += '<p class="small">Nothing flagged this week.</p>';
+        html += '<p class="small flag-empty-msg">Nothing flagged this week.</p>';
       } else {
         flagDetails.forEach(function(f){
-          html += '<div class="detail-ex flagged" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">';
+          html += '<div class="detail-ex flagged" id="flagrow-' + f.id + '" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">';
           html += '<span>\u26A0 ' + f.text + '</span>';
-          html += '<button class="dismiss-flag-btn" onclick="event.stopPropagation(); dismissFlag(\'' + f.id + '\')">Dismiss</button>';
+          html += '<button class="dismiss-flag-btn" onclick="event.stopPropagation(); dismissFlag(\'' + f.id + '\', \'' + a.id + '\')">Dismiss</button>';
           html += '</div>';
         });
       }
+      html += '</div>';
       html += '</td></tr>';
     });
 
@@ -484,11 +486,25 @@
       return raw ? JSON.parse(raw) : {};
     } catch(e){ return {}; }
   }
-  window.dismissFlag = function(flagId){
+  window.dismissFlag = function(flagId, athleteId){
     var dismissed = loadDismissedFlags();
     dismissed[flagId] = true;
     try { localStorage.setItem(DISMISSED_FLAGS_KEY, JSON.stringify(dismissed)); } catch(e){}
-    renderWeek();
+
+    var rowEl = document.getElementById('flagrow-' + flagId);
+    if (rowEl) rowEl.remove();
+
+    var listEl = document.getElementById('flaglist-' + athleteId);
+    var badgeEl = document.getElementById('flagbadge-' + athleteId);
+    if (listEl){
+      var remaining = listEl.querySelectorAll('.detail-ex.flagged').length;
+      if (badgeEl){
+        badgeEl.innerHTML = remaining ? '<span class="flag-badge">' + remaining + '</span>' : '<span class="small">&mdash;</span>';
+      }
+      if (!remaining && !listEl.querySelector('.flag-empty-msg')){
+        listEl.innerHTML = '<p class="small flag-empty-msg">Nothing flagged this week.</p>';
+      }
+    }
   };
 
   var HIDDEN_ENTRIES_KEY = 'coachlog_hidden_entries';
