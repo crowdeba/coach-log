@@ -300,7 +300,7 @@
 
     if (wideRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load workouts: ' + wideRes.error.message + '</td></tr>'; return; }
 
-    var NATURAL_WD = { mon:1, wed:3, fri:5 };
+    var NATURAL_WD = { mon:1, tue:2, wed:3, thu:4, fri:5 };
     function effectiveWeekStart(w){
       var natural = NATURAL_WD[w.workout_type];
       if (natural == null) return sundayOf(parseDate(w.workout_date));
@@ -338,13 +338,14 @@
       byAthlete[w.athlete_id].push(w);
     });
     var SLOT_KEYS = ['mon','wed','fri'];
+    var SLOT_INDEX = { mon:0, tue:0, wed:1, thu:2, fri:2 };   // Tue/Wed/Thu lifters fill the same three columns, in order
     Object.keys(byAthlete).forEach(function(athleteId){
       var raw = byAthlete[athleteId];
       raw.sort(function(a,b){ return a.workout_date < b.workout_date ? -1 : (a.workout_date > b.workout_date ? 1 : 0); });
       var slots = [null, null, null];
       var leftover = [];
       raw.forEach(function(w){
-        var idx = SLOT_KEYS.indexOf(w.workout_type);
+        var idx = (SLOT_INDEX[w.workout_type] == null) ? -1 : SLOT_INDEX[w.workout_type];
         if (idx === -1 || slots[idx]){ leftover.push(w); }
         else { slots[idx] = w; }
       });
