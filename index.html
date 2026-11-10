@@ -278,7 +278,9 @@
     if (!athletesCache){
       var aRes = await sb.from('athletes').select('id,name').order('name');
       if (aRes.error){ bodyEl.innerHTML = '<tr><td colspan="5" class="small">Could not load athletes: ' + aRes.error.message + '</td></tr>'; return; }
-      athletesCache = aRes.data;
+      // Athletes listed here are left out of the Coach Log. Their data stays in Supabase; delete the name to bring them back.
+      var EXCLUDED_ATHLETES = ['Alex Pasquale'];
+      athletesCache = (aRes.data || []).filter(function(a){ return EXCLUDED_ATHLETES.indexOf(a.name) === -1; });
     }
 
     var weekStartIso = isoDate(currentWeekStart);
